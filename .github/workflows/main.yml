@@ -1,0 +1,100 @@
+name: Birrbook CI and Mobile Build
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      build_mobile:
+        description: "Build Android and iOS with Expo EAS"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: birrbook-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Typecheck, tests, and web build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set pnpm version
+        run: corepack prepare pnpm@9.12.0 --activate
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript check
+        run: pnpm check
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build web application
+        run: pnpm exec expo export --platform web --output-dir dist-web
+
+      - name: Verify web build
+        run: test -f dist-web/index.html
+
+      - name: Upload web build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: birrbook-web-build
+          path: dist-web
+          if-no-files-found: error
+          retention-days: 14
+
+  eas-mobile-build:
+    name: Build Android and iOS with Expo EAS
+    if: >
+      github.event_name == 'workflow_dispatch' &&
+      inputs.build_mobile == true
+    needs: validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set pnpm version
+        run: corepack prepare pnpm@9.12.0 --activate
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Expo EAS CLI
+        run: pnpm add --global eas-cli
+
+      - name: Build Android and iOS
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: eas build --platform all --profile production --non-interactive
